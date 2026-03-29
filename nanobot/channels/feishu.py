@@ -17,6 +17,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.channels.utils.feishu import get_bot_open_id
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from pydantic import Field
@@ -407,8 +408,9 @@ class FeishuChannel(BaseChannel):
             if not mid:
                 continue
             # Bot mentions have no user_id (None or "") but a valid open_id
-            if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
-                return True
+            open_id = getattr(mid, "open_id", None) or ""
+            return open_id == get_bot_open_id(self._client)
+
         return False
 
     def _is_group_message_for_bot(self, message: Any) -> bool:
@@ -416,6 +418,37 @@ class FeishuChannel(BaseChannel):
         if self.config.group_policy == "open":
             return True
         return self._is_bot_mentioned(message)
+    
+    def _del_reaction_sync(self, message_id: str, reaction_id: str) -> bool:
+        """Sync helper for deleting reaction (runs in thread pool)."""
+        from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
+        try:
+            request = DeleteMessageReactionRequest.builder() \
+                .message_id(message_id) \
+                .reaction_id(reaction_id) \
+                .build()
+
+            response = self._client.im.v1.message_reaction.delete(request)
+
+            if not response.success():
+                logger.warning("Failed to delete reaction: code={}, msg={}", response.code, response.msg)
+                return False
+            else:
+                logger.debug("Deleted reaction {} from message {}", reaction_id, message_id)
+                return True
+        except Exception as e:
+            logger.warning("Error deleting reaction: {}", e)
+            return False
+    
+    async def _del_reaction(self, message_id: str, reaction_id: str) -> bool:
+        """
+        Delete a reaction emoji from a message (non-blocking).
+        """
+        if not self._client:
+            return False
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._del_reaction_sync, message_id, reaction_id)
 
     def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
         """Sync helper for adding reaction (runs in thread pool)."""
@@ -435,6 +468,7 @@ class FeishuChannel(BaseChannel):
                 logger.warning("Failed to add reaction: code={}, msg={}", response.code, response.msg)
             else:
                 logger.debug("Added {} reaction to message {}", emoji_type, message_id)
+                return getattr(response.data, "reaction_id", None)
         except Exception as e:
             logger.warning("Error adding reaction: {}", e)
 
@@ -448,7 +482,7 @@ class FeishuChannel(BaseChannel):
             return
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+        return await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
 
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
@@ -1122,6 +1156,14 @@ class FeishuChannel(BaseChannel):
             first_send = True  # tracks whether the reply has already been used
 
             def _do_send(m_type: str, content: str) -> None:
+                """ del replied reaction"""
+                if msg.metadata.get("reaction_id") and msg.metadata.get("message_id"):
+                    self._del_reaction_sync(
+                        msg.metadata.get("message_id"),
+                        msg.metadata.get("reaction_id"))
+                else:
+                    logger.warning("not found reaction id or message id in msg metadata, message id: %s", reply_message_id)
+
                 """Send via reply (first message) or create (subsequent)."""
                 nonlocal first_send
                 if reply_message_id and first_send:
@@ -1227,7 +1269,7 @@ class FeishuChannel(BaseChannel):
                 return
 
             # Add reaction
-            await self._add_reaction(message_id, self.config.react_emoji)
+            reaction_id = await self._add_reaction(message_id, self.config.react_emoji)
 
             # Parse content
             content_parts = []
@@ -1310,6 +1352,7 @@ class FeishuChannel(BaseChannel):
                     "parent_id": parent_id,
                     "root_id": root_id,
                     "thread_id": thread_id,
+                    "reaction_id": reaction_id,
                 }
             )
 
