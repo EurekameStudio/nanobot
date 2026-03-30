@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from lark_oapi.api.im.v1.model import P2ImMessageReceiveV1, MentionEvent
+
 from loguru import logger
 
 from nanobot.bus.events import OutboundMessage
@@ -396,6 +398,45 @@ class FeishuChannel(BaseChannel):
         """
         self._running = False
         logger.info("Feishu bot stopped")
+
+    @staticmethod
+    def _resolve_mentions(text: str, mentions: list[MentionEvent] | None) -> str:
+        """Replace @_user_n placeholders with actual user info from mentions.
+
+        Args:
+            text: The message text containing @_user_n placeholders
+            mentions: List of mention objects from Feishu message
+
+        Returns:
+            Text with placeholders replaced by @姓名 (open_id)
+        """
+        if not mentions or not text:
+            return text
+
+        for mention in mentions:
+            key = mention.key or None
+            if not key or key not in text:
+                continue
+
+            userID = mention.id or None
+            if not userID:
+                continue
+
+            open_id = userID.open_id
+            user_id = userID.user_id
+            name = mention.name or key
+
+            # Format: @姓名 (open_id, user_id: xxx)
+            if open_id and user_id:
+                replacement = f"@{name} ({open_id}, user id: {user_id})"
+            elif open_id:
+                replacement = f"@{name} ({open_id})"
+            else:
+                replacement = f"@{name}"
+
+            text = text.replace(key, replacement)
+
+        return text
 
     def _is_bot_mentioned(self, message: Any) -> bool:
         """Check if the bot is @mentioned in the message."""
@@ -1156,14 +1197,6 @@ class FeishuChannel(BaseChannel):
             first_send = True  # tracks whether the reply has already been used
 
             def _do_send(m_type: str, content: str) -> None:
-                """ del replied reaction"""
-                if msg.metadata.get("reaction_id") and msg.metadata.get("message_id"):
-                    self._del_reaction_sync(
-                        msg.metadata.get("message_id"),
-                        msg.metadata.get("reaction_id"))
-                else:
-                    logger.warning("not found reaction id or message id in msg metadata, message id: %s", reply_message_id)
-
                 """Send via reply (first message) or create (subsequent)."""
                 nonlocal first_send
                 if reply_message_id and first_send:
@@ -1238,13 +1271,16 @@ class FeishuChannel(BaseChannel):
         if self._loop and self._loop.is_running():
             asyncio.run_coroutine_threadsafe(self._on_message(data), self._loop)
 
-    async def _on_message(self, data: Any) -> None:
+    async def _on_message(self, data: P2ImMessageReceiveV1) -> None:
         """Handle incoming message from Feishu."""
         try:
             event = data.event
             message = event.message
             sender = event.sender
-            
+
+            logger.debug("Feishu raw message: {}", message.content)
+            logger.debug("Feishu mentions: {}", getattr(message, "mentions", None))
+
             # Deduplication check
             message_id = message.message_id
             if message_id in self._processed_message_ids:
@@ -1283,6 +1319,8 @@ class FeishuChannel(BaseChannel):
             if msg_type == "text":
                 text = content_json.get("text", "")
                 if text:
+                    mentions = getattr(message, "mentions", None)
+                    text = self._resolve_mentions(text, mentions)
                     content_parts.append(text)
 
             elif msg_type == "post":
@@ -1355,6 +1393,8 @@ class FeishuChannel(BaseChannel):
                     "reaction_id": reaction_id,
                 }
             )
+            await self._del_reaction(message_id, reaction_id)
+
 
         except Exception as e:
             logger.error("Error processing Feishu message: {}", e)
