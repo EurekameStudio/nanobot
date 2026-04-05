@@ -1,6 +1,6 @@
 ---
 name: rg
-description: "使用 ripgrep (rg) 进行快速代码搜索。支持在代码库中搜索文本模式，自动遵循 .gitignore，支持正则表达式，搜索速度快。"
+description: "使用 ripgrep (rg) 进行快速代码搜索。适用于需要在代码库中按关键词/正则批量定位内容、按文件类型过滤、在大仓库中高性能检索并遵循 .gitignore 的场景。"
 metadata:
   requires:
     bins: ["rg"]
@@ -47,12 +47,14 @@ rg -C 3 "pattern"               # 显示匹配行前后3行上下文
 | `-B N` | 显示匹配行前 N 行 |
 | `-A N` | 显示匹配行后 N 行 |
 | `-w` | 匹配整个单词 |
+| `-x` | 整行精确匹配（整行都需匹配） |
 | `-F` | 固定字符串（不使用正则） |
 | `-t TYPE` | 按文件类型过滤（如 `-t py`、`-t js`） |
 | `-g GLOB` | 包含/排除 glob 模式 |
 | `--hidden` | 搜索隐藏文件 |
 | `--no-ignore` | 不遵循 .gitignore |
 | `--max-depth N` | 限制搜索深度 |
+| `--max-filesize SIZE` | 跳过超过指定大小的文件（如 `1M`、`500K`） |
 
 ## 文件类型过滤
 
@@ -92,6 +94,28 @@ rg "pattern" -g '!node_modules/' -g '!*.log'
 
 # 带上下文搜索，便于理解
 rg -C 5 "class User" -t py
+
+# 限制大文件扫描（避免搜索超大日志/构建产物）
+rg "timeout" --max-filesize 1M
+
+# 整行精确匹配（例如匹配单独一行 TODO）
+rg -x "TODO"
+```
+
+## 管道组合示例
+
+```bash
+# 先查再截断，快速看前 20 条
+rg "TODO|FIXME" -n | head -20
+
+# 统计最常出现的匹配文件
+rg "deprecated" -l | sort | uniq -c | sort -nr | head
+
+# 将匹配文件交给 xargs 做后续处理（统计行数）
+rg "class User" -l -t py | xargs wc -l
+
+# 结合 fzf 交互选择目标文件（本机安装 fzf 时）
+rg "config" -l | fzf
 ```
 
 ## 与 grep 对比
