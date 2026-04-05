@@ -39,6 +39,10 @@
 - **2026-03-26** 🏗️ Agent runner extracted and lifecycle hooks unified; stream delta coalescing at boundaries.
 - **2026-03-25** 🌏 StepFun provider, configurable timezone, Gemini thought signatures.
 - **2026-03-24** 🔧 WeChat compatibility, Feishu CardKit streaming, test suite restructured.
+
+<details>
+<summary>Earlier news</summary>
+
 - **2026-03-23** 🔧 Command routing refactored for plugins, WhatsApp/WeChat media, unified channel login CLI.
 - **2026-03-22** ⚡ End-to-end streaming, WeChat channel, Anthropic cache optimization, `/status` command.
 - **2026-03-21** 🔒 Replace `litellm` with native `openai` + `anthropic` SDKs. Please see [commit](https://github.com/HKUDS/nanobot/commit/3dfdab7).
