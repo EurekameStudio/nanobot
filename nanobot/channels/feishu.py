@@ -1459,6 +1459,13 @@ class FeishuChannel(BaseChannel):
 
             logger.debug("Feishu raw message: {}", message.content)
             logger.debug("Feishu mentions: {}", getattr(message, "mentions", None))
+            logger.debug(
+                "Feishu msg_detail: msg_type={}, chat_type={}, chat_id={}, sender_id={}",
+                message.message_type,
+                message.chat_type,
+                message.chat_id,
+                sender.sender_id.open_id if sender.sender_id else "unknown",
+            )
 
             # Deduplication check
             message_id = message.message_id
@@ -1563,6 +1570,21 @@ class FeishuChannel(BaseChannel):
 
             if not content and not media_paths:
                 return
+
+            logger.debug(
+                "Feishu inbound: content={!r}, media={}, metadata={}",
+                content,
+                media_paths,
+                {
+                    "message_id": message_id,
+                    "reaction_id": reaction_id,
+                    "chat_type": chat_type,
+                    "msg_type": msg_type,
+                    "parent_id": parent_id,
+                    "root_id": root_id,
+                    "thread_id": thread_id,
+                },
+            )
 
             # Forward to message bus
             reply_to = chat_id if chat_type == "group" else sender_id

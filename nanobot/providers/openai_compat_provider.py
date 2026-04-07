@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import json_repair
+from loguru import logger
 
 if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
     from langfuse.openai import AsyncOpenAI
@@ -765,6 +766,12 @@ class OpenAICompatProvider(LLMProvider):
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
+            logger.debug(
+                "chat error: model={}, kwargs_keys={}, error={}",
+                kwargs.get("model"),
+                list(kwargs.keys()),
+                e,
+            )
             return self._handle_error(e)
 
     async def chat_stream(
@@ -790,6 +797,12 @@ class OpenAICompatProvider(LLMProvider):
         kwargs["stream"] = True
         if not (self._spec and self._spec.name == "gemini"):
             kwargs["stream_options"] = {"include_usage": True}
+        logger.debug(
+            "chat_stream kwargs: model={}, stream_options={}, messages={}",
+            kwargs.get("model"),
+            kwargs.get("stream_options", "(omitted)"),
+            kwargs.get("messages"),
+        )
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             stream = await self._client.chat.completions.create(**kwargs)
@@ -818,6 +831,7 @@ class OpenAICompatProvider(LLMProvider):
                 error_kind="timeout",
             )
         except Exception as e:
+            logger.debug("chat_stream error: model={}, error={}", kwargs.get("model"), e)
             return self._handle_error(e)
 
     def get_default_model(self) -> str:
